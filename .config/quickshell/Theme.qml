@@ -15,12 +15,13 @@ QtObject {
     readonly property int animMed: 220
     readonly property int animSlow: 380
 
-    property real bgAlpha: 0.8   
+    property real bgAlpha: 0.7   
     property color _bgBase: palette.bg || '#000000'
     property color bg: alpha(_bgBase, bgAlpha)
     property real imageOpacity: palette.imageOpacity !== undefined ? Math.max(0, Math.min(1, Number(palette.imageOpacity))) : 0.8
     property color text: palette.text || '#ffffff'
     property color textDim: palette.textDim || '#c2c2c2'
+    property color textFaint: palette.textFaint || '#4a4a4a'
     property color danger: palette.danger || '#ff003c'
     property color accent: palette.accent || '#ffffff'
     property color accent2: palette.accent2 || '#ffffff'
@@ -28,7 +29,6 @@ QtObject {
     property color bgPanel: palette.bgPanel || '#050505'
     property color bgCard: palette.bgCard || '#0d0d0d'
     property color borderAccent: palette.borderAccent || '#2a2a2a'
-    property color textFaint: palette.textFaint || '#4a4a4a'
     property color ok: palette.ok || '#00ff9c'
     property color trackBg: palette.trackBg || '#161616'
 
