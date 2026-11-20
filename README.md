@@ -82,6 +82,23 @@ Just made some tweaks to it. Give it some love: [hyprquickpaper](https://github.
 > All keybinds: [.config/hypr/keybinds.lua](.config/hypr/keybinds.lua)
 
 ---
+## Restoring this setup on another machine
+
+This repository is the customized copy of the 43PR setup — the Quickshell bar, dock, desktop wall and shelf, the bluetooth agent, the systemd user units and the current theme palette are all here. Cloning it and running the installer rebuilds the setup on a fresh Arch-based install:
+
+```bash
+sudo pacman -S git
+
+git clone git@github.com:D1vyanshSingh/dotfiles.git
+mv dotfiles ~/dotfiles
+cd ~/dotfiles && chmod +x install.sh && ./install.sh
+```
+
+On the new machine, authenticate first: either add a fresh SSH key to the GitHub account, or clone over HTTPS with a personal access token. Keep the clone where you put it — `install.sh` symlinks `~/.config` into the repository, so moving or deleting it breaks every link.
+
+To save later changes from a machine that already has the repo, commit and run `git push backup main` (`origin` still points at upstream 43PR, for pulling their future updates). Runtime state — todo list, shelf contents, bar layout, notification history — lives in `~/.config/quickshell/state/` and is deliberately git-ignored, so it stays machine-local.
+
+---
 ## Installation 
 
 **READ ALL**
