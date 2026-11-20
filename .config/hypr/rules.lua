@@ -7,6 +7,13 @@ hl.layer_rule({
     ignore_alpha = 0.15,
 })
 
+-- glass surfaces: the desktop wall, menubar and dock paint at low alpha and
+-- rely on the compositor to blur the wallpaper behind them. ignore_alpha = 0
+-- keeps the rounded corners blurred instead of hard-clipping them.
+hl.layer_rule({ match = { namespace = "desktop-widgets-.*" }, blur = true, ignore_alpha = 0 })
+hl.layer_rule({ match = { namespace = "quickshell-bar" }, blur = true, ignore_alpha = 0 })
+hl.layer_rule({ match = { namespace = "quickshell-dock" }, blur = true, ignore_alpha = 0 })
+
 -- Opacity rules: 90% for all windows except fullscreen
 hl.window_rule({
     match = { class = ".*" },

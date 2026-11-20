@@ -8,6 +8,15 @@ QtObject {
     id: root
 
     readonly property int radius: 10
+
+    // ── glass shell (desktop wall, menubar, dock) ──
+    // tiles are blurred by the compositor behind these, so the fill stays low
+    readonly property int radiusTile: 22
+    readonly property int radiusBar: 18
+    readonly property color glass: Qt.rgba(0.09, 0.09, 0.105, 0.55)
+    readonly property color glassRaised: Qt.rgba(0.11, 0.11, 0.13, 0.70)
+    readonly property color glassStroke: Qt.rgba(1, 1, 1, 0.10)
+    readonly property color glassScrim: Qt.rgba(0, 0, 0, 0.55)
     readonly property real tiltStrength: 7
     readonly property string fontFamily: "JetBrains Mono"
     property string iconFont: "JetBrainsMono Nerd Font"
@@ -15,7 +24,7 @@ QtObject {
     readonly property int animMed: 220
     readonly property int animSlow: 380
 
-    property real bgAlpha: 0.7   
+    property real bgAlpha: 0.9   
     property color _bgBase: palette.bg || '#000000'
     property color bg: alpha(_bgBase, bgAlpha)
     property real imageOpacity: palette.imageOpacity !== undefined ? Math.max(0, Math.min(1, Number(palette.imageOpacity))) : 0.8

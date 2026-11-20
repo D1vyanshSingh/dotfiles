@@ -21,8 +21,8 @@ Scope {
         adapter: JsonAdapter {
             id: cfg
             property string position: "top"       // top | right | bottom | left
-            property string style: "floating"     // floating | joined | strip
-            property int thickness: 20
+            property string style: "menubar"      // menubar | floating | joined | strip
+            property int thickness: 26
             property int margin: 4
             property real scale: 1.0
             property real bgOpacity: 1.0
@@ -33,6 +33,7 @@ Scope {
             property bool showVolume: true
             property bool showBattery: true
             property bool showNet: true
+            property bool showWarp: true
         }
     }
 
@@ -43,21 +44,68 @@ Scope {
     }
 
     function resetSettings() {
-        cfg.position = "top"; cfg.style = "joined"; cfg.thickness = 20; cfg.margin = 4;
+        cfg.position = "top"; cfg.style = "menubar"; cfg.thickness = 26; cfg.margin = 4;
         cfg.scale = 1.0; cfg.bgOpacity = 0.7; cfg.border = false;
         cfg.showStats = false; cfg.showWs = true; cfg.showMedia = true;
         cfg.showVolume = true; cfg.showBattery = true; cfg.showNet = true;
     }
 
     // ───────────────────────── Derived layout values ─────────────────────────
+    // "menubar" is the flush strip: full screen width, no gap, no radius, and a
+    // fill that follows the wallpaper (see below).
+    readonly property bool menubar: cfg.style === "menubar"
     readonly property bool vertical: cfg.position === "left" || cfg.position === "right"
     readonly property bool joined: cfg.style !== "floating"
     readonly property int panelThick: vertical ? cfg.thickness + 12 : cfg.thickness
-    readonly property int effEdge: cfg.style === "strip" ? 0 : cfg.margin
-    readonly property int effGap: cfg.style === "strip" ? 0 : 6
-    readonly property real barRadius: cfg.style === "strip" ? 0 : Theme.radius
-    readonly property color bgColor: Qt.alpha(Theme.bg, cfg.bgOpacity)
+    readonly property int effEdge: root.menubar || cfg.style === "strip" ? 0 : cfg.margin
+    readonly property int effGap: root.menubar || cfg.style === "strip" ? 0 : 6
+    readonly property real barRadius: root.menubar || cfg.style === "strip" ? 0 : Theme.radiusBar
+    readonly property color bgColor: root.menubar ? root.wallGlass
+        : cfg.style === "strip" ? Theme.glass : Theme.glassRaised
     readonly property color borderColor: Qt.alpha(Theme.accent, 0.25)
+    readonly property int edgePad: root.menubar ? 10 : 0
+
+    // ── menubar material ──
+    // the strip sits flush on the wall, so its fill has to follow that image. a
+    // fill tuned for a night wall turns to fog over a bright one — but only the
+    // band actually behind the bar matters, not the whole picture: a dark-top,
+    // bright-bottom wall needs a light strip even though its mean is mid grey.
+    readonly property string themeState: Quickshell.env("HOME") + "/.local/state/43pr/state.json"
+    property string wallPath: ""
+    property real wallLum: 0.12
+    readonly property real wallDensity: Math.min(0.82, 0.46 + 0.32 * Math.min(1, root.wallLum))
+    readonly property color wallGlass: Qt.rgba(0.05, 0.052, 0.06, root.wallDensity)
+
+    readonly property var lumArgs: {
+        const g = cfg.position === "bottom" ? "South"
+                : cfg.position === "left" ? "West"
+                : cfg.position === "right" ? "East" : "North";
+        // -alpha off matters: most wallpapers carry an opaque alpha channel and
+        // fx:mean then averages it in, reporting a black band as ~0.5
+        return ["magick", root.wallPath, "-alpha", "off", "-gravity", g,
+                "-crop", root.vertical ? "8%x100%+0+0" : "100%x8%+0+0", "+repage",
+                "-colorspace", "Gray", "-resize", "1x1", "-format", "%[fx:mean]", "info:"];
+    }
+
+    // ── focused app (menubar) ──
+    readonly property var activeTop: Hyprland.activeToplevel
+    readonly property string activeApp: {
+        const t = root.activeTop
+        if (!t) return "DESKTOP"
+        let s = ""
+        try { if (t.wayland && t.wayland.appId) s = String(t.wayland.appId) } catch (e) {}
+        if (s === "") {
+            try {
+                const c = t.lastIpcObject ? String(t.lastIpcObject["class"] || "") : ""
+                if (c !== "" && c !== "undefined") s = c
+            } catch (e) {}
+        }
+        // some apps report a package id instead of a name
+        // ("@codebuff/freebuff-desktop"); there is nothing readable in that, so
+        // leave the label empty and let the menubar collapse it
+        if (s.indexOf("/") >= 0) return ""
+        return s === "" ? "DESKTOP" : s.toUpperCase()
+    }
 
     function s(n) { return Math.round(n * cfg.scale); }
 
@@ -103,7 +151,7 @@ Scope {
     Timer { id: rebuildTimer; interval: 80; onTriggered: root.barLive = true }
     Connections {
         target: cfg
-        function onPositionChanged() { root.rebuildBar(); }
+        function onPositionChanged() { root.rebuildBar(); wallLumProc.running = true; }
         function onStyleChanged() { root.rebuildBar(); }
     }
 
@@ -120,14 +168,40 @@ Scope {
             cfg.position = order[(order.indexOf(cfg.position) + 1) % order.length];
         }
         function setStyle(st: string): void {
-            if (["floating", "joined", "strip"].indexOf(st) >= 0) cfg.style = st;
+            if (["menubar", "floating", "joined", "strip"].indexOf(st) >= 0) cfg.style = st;
         }
         function customize(): void { root.settingsOpen = !root.settingsOpen; }
+        function warp(): void { root.warpOpen = !root.warpOpen; }
+    }
+
+    IpcHandler {
+        target: "calendar"
+        function toggle(): void {
+            if (!clockPanel) return;
+            clockPanel.monthOffset = 0;
+            clockPanel.calOpen = !clockPanel.calOpen;
+        }
+        function show(): void {
+            if (!clockPanel) return;
+            clockPanel.monthOffset = 0;
+            clockPanel.calOpen = true;
+        }
+        function hide(): void { if (clockPanel) clockPanel.calOpen = false; }
     }
 
     property int cpuUsage: 0
     property int memPercent: 0
     property string netState: "disconnected"
+
+    // ───────────────────────── Cloudflare WARP ─────────────────────────
+    property string warpState: "disconnected"   // connected | connecting | disconnecting | disconnected
+    property bool warpOpen: false
+    readonly property bool warpOn: warpState === "connected" || warpState === "connecting"
+    readonly property string warpLabel: warpState === "connected" ? "Connected"
+        : warpState === "connecting" ? "Connecting…"
+        : warpState === "disconnecting" ? "Disconnecting…"
+        : "Disconnected"
+
     property real _prevTotal: 0
     property real _prevIdle: 0
 
@@ -172,6 +246,41 @@ Scope {
         }
     }
 
+    // the wallpaper currently on screen, straight from 43pr's state file, so the
+    // menubar re-measures itself when the wall changes instead of keeping a
+    // density that belonged to the previous image
+    FileView {
+        id: wallState
+        path: root.themeState
+        watchChanges: true
+        printErrors: false
+        onFileChanged: reload()
+        onLoaded: {
+            try {
+                const st = JSON.parse(text());
+                const p = st && st.wallpaper ? String(st.wallpaper) : "";
+                if (p !== "" && p !== root.wallPath) {
+                    root.wallPath = p;
+                    wallLumProc.running = true;
+                }
+            } catch (e) {
+                console.warn("bar: malformed theme state: " + e);
+            }
+        }
+    }
+
+    Process {
+        id: wallLumProc
+        running: false
+        command: root.lumArgs
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const v = parseFloat(text);
+                if (!isNaN(v)) root.wallLum = v;
+            }
+        }
+    }
+
     Timer {
         interval: 2000; running: root.barVisible; repeat: true; triggeredOnStart: true
         onTriggered: { statFile.reload(); memFile.reload(); }
@@ -180,6 +289,40 @@ Scope {
     Timer {
         interval: 10000; running: root.barVisible; repeat: true; triggeredOnStart: true
         onTriggered: if (!netProc.running) netProc.running = true
+    }
+
+    Process {
+        id: warpProc
+        command: ["warp-cli", "--accept-tos", "status"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const t = text.toLowerCase();
+                // "disconnecting" contains "connecting" and "disconnected" contains
+                // "connected", so the transitional states have to win first.
+                root.warpState = t.indexOf("disconnecting") >= 0 ? "disconnecting"
+                    : t.indexOf("connecting") >= 0 ? "connecting"
+                    : t.indexOf("connected") >= 0 && t.indexOf("disconnected") < 0 ? "connected"
+                    : "disconnected";
+            }
+        }
+    }
+
+    Process {
+        id: warpAction
+        stdout: StdioCollector {}
+        stderr: StdioCollector {}
+        onExited: if (!warpProc.running) warpProc.running = true
+    }
+
+    function warpToggle(on) {
+        root.warpState = on ? "connecting" : "disconnecting";
+        warpAction.command = ["warp-cli", "--accept-tos", on ? "connect" : "disconnect"];
+        warpAction.running = true;
+    }
+
+    Timer {
+        interval: 3000; running: root.barVisible; repeat: true; triggeredOnStart: true
+        onTriggered: if (!warpProc.running) warpProc.running = true
     }
 
     PwObjectTracker { objects: [Pipewire.defaultAudioSink] }
@@ -229,9 +372,21 @@ Scope {
 
         Layout.alignment: Qt.AlignCenter
         // vertical: every module is exactly as wide as the bar, content is centered inside
-        implicitWidth: root.vertical ? root.panelThick : content.implicitWidth + 20
+        implicitWidth: root.vertical ? root.panelThick
+                                   : content.implicitWidth + (root.menubar ? 14 : 20)
         implicitHeight: root.vertical ? Math.max(20, content.implicitHeight + 8)
                                       : Math.max(root.panelThick - 2, content.implicitHeight)
+
+        // menubar items take a soft pad on hover, the way a menu bar item does
+        Rectangle {
+            anchors.fill: parent
+            anchors.topMargin: 3
+            anchors.bottomMargin: 3
+            radius: 5
+            visible: root.menubar
+            color: Qt.rgba(1, 1, 1, ma.containsMouse ? 0.09 : 0.0)
+            Behavior on color { ColorAnimation { duration: Theme.animFast } }
+        }
 
         GridLayout {
             id: content
@@ -422,7 +577,7 @@ Scope {
                         Layout.fillWidth: true
                         Lbl { text: "Style"; Layout.fillWidth: true }
                         Seg {
-                            options: ["floating", "joined", "strip"]
+                            options: ["menubar", "floating", "joined", "strip"]
                             current: cfg.style
                             onPicked: v => cfg.style = v
                         }
@@ -483,7 +638,8 @@ Scope {
                             { k: "showMedia", l: "Media" },
                             { k: "showVolume", l: "Volume" },
                             { k: "showBattery", l: "Battery" },
-                            { k: "showNet", l: "Network" }
+                            { k: "showNet", l: "Network" },
+                            { k: "showWarp", l: "Cloudflare WARP" }
                         ]
                         delegate: RowLayout {
                             id: trow
@@ -531,6 +687,7 @@ Scope {
             implicitHeight: root.vertical ? 0 : root.panelThick + root.effEdge
             color: "transparent"
             visible: root.barVisible
+            WlrLayershell.namespace: "quickshell-bar"
 
             Item {
                 id: frame
@@ -542,7 +699,7 @@ Scope {
                     rightMargin: cfg.position === "right" ? root.effEdge : (root.vertical ? 0 : root.effGap)
                 }
 
-                // continuous background for "joined" / "strip"
+                // continuous background for "joined" / "strip" / "menubar"
                 Rectangle {
                     visible: root.joined
                     anchors.fill: parent
@@ -552,18 +709,29 @@ Scope {
                     border.color: root.borderColor
                 }
 
+                // the strip is flush with the screen edge, so this hairline is the
+                // only thing separating it from the desktop
+                Rectangle {
+                    visible: root.menubar
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                    height: 1
+                    color: Qt.rgba(1, 1, 1, 0.09)
+                }
+
                 // ── start section ──
                 Panel {
                     lane: startLane
                     anchors.left: frame.left
                     anchors.top: frame.top
+                    anchors.leftMargin: root.edgePad
 
                     Lane {
                         id: startLane
                         anchors.centerIn: parent
+                        gap: root.menubar ? 4 : 0
 
                         Mod {
-                            visible: cfg.showStats && !root.vertical
+                            visible: cfg.showStats && !root.vertical && !root.menubar
                             baseSize: root.sizeCpuRam
                             glyphSize: root.sizeCpuRam + 4
                             vglyph: "\uDB81\uDE1A"
@@ -572,7 +740,7 @@ Scope {
                             color: root.vertical && root.cpuUsage >= 85 ? Theme.danger : Theme.text
                         }
                         Mod {
-                            visible: cfg.showStats && !root.vertical
+                            visible: cfg.showStats && !root.vertical && !root.menubar
                             baseSize: root.sizeCpuRam
                             glyphSize: root.sizeCpuRam + 4
                             vglyph: "\uDB80\uDF5B"
@@ -626,6 +794,29 @@ Scope {
                                     ? "hyprctl dispatch 'hl.dsp.focus({workspace=\"e+1\"})'"
                                     : "hyprctl dispatch 'hl.dsp.focus({workspace=\"e-1\"})'")
                             }
+                        }
+
+                        // menubar: the focused window's app id, the way a title bar
+                        // would read it — mono caps, dimmer than the clock. apps with
+                        // no readable name (package-style ids) drop the whole section
+                        Rectangle {
+                            visible: root.menubar && root.activeApp !== ""
+                            Layout.alignment: Qt.AlignCenter
+                            implicitWidth: 1
+                            implicitHeight: 11
+                            color: Qt.rgba(1, 1, 1, 0.14)
+                        }
+
+                        Text {
+                            visible: root.menubar && root.activeApp !== ""
+                            Layout.alignment: Qt.AlignCenter
+                            text: root.activeApp
+                            color: Theme.textDim
+                            font.family: Theme.iconFont
+                            font.pixelSize: root.s(10)
+                            font.bold: true
+                            font.letterSpacing: 0.6
+                            renderType: Text.NativeRendering
                         }
                     }
                 }
@@ -867,6 +1058,7 @@ Scope {
                 Panel {
                     lane: endLane
                     anchors.right: root.vertical ? undefined : frame.right
+                    anchors.rightMargin: root.vertical ? 0 : root.edgePad
                     anchors.bottom: root.vertical ? frame.bottom : undefined
                     anchors.top: root.vertical ? undefined : frame.top
                     anchors.left: root.vertical ? frame.left : undefined
@@ -874,6 +1066,26 @@ Scope {
                     Lane {
                         id: endLane
                         anchors.centerIn: parent
+                        gap: root.menubar ? 4 : 0
+
+                        // on the strip the stats live on the right, small and dim,
+                        // like a status item rather than a headline
+                        Mod {
+                            visible: cfg.showStats && root.menubar
+                            baseSize: root.s(10)
+                            glyphSize: root.s(12)
+                            glyph: "\uDB81\uDE1A"
+                            text: root.cpuUsage + "%"
+                            color: Theme.textDim
+                        }
+                        Mod {
+                            visible: cfg.showStats && root.menubar
+                            baseSize: root.s(10)
+                            glyphSize: root.s(12)
+                            glyph: "\uDB80\uDF5B"
+                            text: root.memPercent + "%"
+                            color: Theme.textDim
+                        }
 
                         // horizontal: scrolling title
                         Item {
@@ -953,7 +1165,7 @@ Scope {
                             glyph: muted || vol <= 0 ? "\uDB81\uDF5F"
                                  : vol > 0.66 ? "\uDB81\uDD7E"
                                  : vol > 0.33 ? "\uDB81\uDD80" : "\uDB81\uDD7F"
-                            text: muted ? "Muted" : Math.round(vol * 100) + "%"
+                            text: root.menubar ? "" : (muted ? "Muted" : Math.round(vol * 100) + "%")
                             vtext: ""
                             color: muted ? Theme.danger : Theme.text
                             onScrolled: delta => {
@@ -991,10 +1203,153 @@ Scope {
                         }
 
                         Mod {
+                            id: warpMod
+                            visible: cfg.showWarp
+                            // outline cloud = off, filled cloud = on (the theme is monochrome,
+                            // so shape carries the state rather than colour)
+                            baseSize: root.warpOn ? root.sizeNetIcon + 1 : root.sizeNetIcon + 2
+                            yOffset: root.iconYOffset
+                            text: root.warpOn ? "\uf0c2" : "\uebaa"
+                            color: root.warpState === "connecting" || root.warpState === "disconnecting"
+                                ? Theme.textDim : Theme.text
+                            onClicked: mouse => {
+                                if (mouse.button === Qt.RightButton)
+                                    root.warpToggle(!root.warpOn);
+                                else
+                                    root.warpOpen = !root.warpOpen;
+                            }
+                        }
+
+                        Mod {
                             baseSize: root.sizePowerIcon
                             yOffset: root.iconYOffset
                             text: "\u23FB"
                             onClicked: root.run("qs ipc call powermenu toggle")
+                        }
+                    }
+
+                    LazyLoader {
+                        active: root.warpOpen
+
+                        PopupWindow {
+                            readonly property point p: bar.contentItem.mapFromItem(warpMod, 0, 0)
+
+                            anchor.window: bar
+                            anchor.rect.x: root.vertical
+                                ? (cfg.position === "left" ? p.x + warpMod.width + 6
+                                                           : p.x - implicitWidth - 6)
+                                : p.x + warpMod.width - implicitWidth
+                            anchor.rect.y: root.vertical
+                                ? p.y + (warpMod.height - implicitHeight) / 2
+                                : (cfg.position === "top" ? p.y + warpMod.height + 4
+                                                          : p.y - implicitHeight - 4)
+                            implicitWidth: 252
+                            implicitHeight: warpCol.implicitHeight + 28
+                            color: "transparent"
+                            visible: true
+
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 4
+                                color: Qt.alpha(Theme.bgPanel, 0.97)
+                                border.width: cfg.border ? 1 : 0
+                                border.color: root.borderColor
+
+                                Column {
+                                    id: warpCol
+                                    anchors.centerIn: parent
+                                    width: 224
+                                    spacing: 12
+
+                                    // header: mark · title · switch
+                                    Item {
+                                        width: parent.width
+                                        height: 22
+
+                                        Text {
+                                            id: warpMark
+                                            anchors.left: parent.left
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: root.warpOn ? "\uf0c2" : "\uebaa"
+                                            color: root.warpOn ? Theme.text : Theme.textDim
+                                            font.family: Theme.iconFont
+                                            font.pixelSize: root.warpOn ? 16 : 17
+                                            renderType: Text.NativeRendering
+
+                                            SequentialAnimation on opacity {
+                                                running: root.warpState === "connecting"
+                                                         || root.warpState === "disconnecting"
+                                                loops: Animation.Infinite
+                                                NumberAnimation { from: 1; to: 0.3; duration: 550; easing.type: Easing.InOutQuad }
+                                                NumberAnimation { from: 0.3; to: 1; duration: 550; easing.type: Easing.InOutQuad }
+                                            }
+                                        }
+
+                                        Text {
+                                            anchors.left: warpMark.right
+                                            anchors.leftMargin: 9
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "CLOUDFLARE WARP"
+                                            color: Theme.text
+                                            font.family: Theme.iconFont
+                                            font.pixelSize: 11
+                                            font.bold: true
+                                            font.letterSpacing: 0.5
+                                        }
+
+                                        Toggle {
+                                            anchors.right: parent.right
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            checked: root.warpOn
+                                            onToggled: v => root.warpToggle(v)
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: parent.width
+                                        height: 1
+                                        color: Qt.alpha(Theme.text, 0.1)
+                                    }
+
+                                    // status line
+                                    Item {
+                                        width: parent.width
+                                        height: 16
+
+                                        Rectangle {
+                                            id: warpDot
+                                            width: 6; height: 6; radius: 3
+                                            anchors.left: parent.left
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            color: root.warpState === "connected" ? Theme.ok
+                                                 : root.warpState === "connecting" ? Theme.accent
+                                                 : root.warpState === "disconnecting" ? Theme.textDim
+                                                 : Qt.alpha(Theme.textFaint, 1)
+                                        }
+
+                                        Text {
+                                            anchors.left: warpDot.right
+                                            anchors.leftMargin: 8
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: root.warpLabel
+                                            color: root.warpState === "connected" ? Theme.text : Theme.textDim
+                                            font.family: Theme.iconFont
+                                            font.pixelSize: 11
+                                        }
+                                    }
+
+                                    Text {
+                                        width: parent.width
+                                        text: root.warpOn ? "Traffic is encrypted and routed through Cloudflare."
+                                                          : "Traffic uses your normal connection."
+                                        color: Theme.textFaint
+                                        font.family: Theme.iconFont
+                                        font.pixelSize: 10
+                                        wrapMode: Text.WordWrap
+                                        lineHeight: 1.2
+                                    }
+                                }
+                            }
                         }
                     }
                 }

@@ -7,6 +7,9 @@ ShellRoot {
     Notifications {}
     PowerMenu {}
     Bar {}
+    Shelf {}
+    DesktopWidgets {}
     Todo {}
+    Dock {}
     Wheel {}
 }

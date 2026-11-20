@@ -9,7 +9,7 @@ PanelWindow {
     id: main
 
     property int speed: 5000
-    property int animDuration: 1000
+    property int animDuration: 500
     property real zoomScale: 0.8
     property real edgeScale: 0.3
     property real skewFactor: 0
@@ -26,6 +26,8 @@ PanelWindow {
     property string cachePath: configs.cache_path.replace("$HOME", Quickshell.env("HOME"))
 
     property bool showEmpty: false
+    property bool closing: false
+    property real wheelAccum: 0
     readonly property bool looksEmpty: wallpaperPath !== ""
                                        && folderModel.status === FolderListModel.Ready
                                        && folderModel.count === 0
@@ -48,7 +50,54 @@ PanelWindow {
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
 
-    Component.onCompleted: Quickshell.execDetached(["bash", Quickshell.shellPath("cache.sh"), Quickshell.shellDir])
+    Component.onCompleted: {
+        Quickshell.execDetached(["bash", Quickshell.shellPath("cache.sh"), Quickshell.shellDir])
+        // enter animation: the window maps transparent, so reveal the stage right away
+        stage.shown = true
+    }
+
+    // Animate the whole overlay in and out instead of popping/vanishing.
+    function close() {
+        if (closing) return
+        closing = true
+        stage.shown = false
+        closeTimer.restart()
+    }
+
+    // Wheel scrolling: convert raw deltas into whole tile steps so the
+    // Behavior on contentX always drives the movement (no instant jumps).
+    // Touchpads on Wayland often send pixelDelta with angleDelta = 0, so the
+    // caller passes whichever delta was non-zero plus its step threshold.
+    function scrollBy(delta, threshold) {
+        if (closing || delta === 0) return
+        wheelAccum += delta
+        var steps = Math.trunc(wheelAccum / threshold)
+        if (steps === 0) return
+        wheelAccum -= steps * threshold
+        steps = Math.max(-3, Math.min(3, steps))
+        var idx = list.clampIndex(Math.round(list.contentX / list.step) + steps)
+        list.userMoved = true
+        list.selectedIndex = idx
+        list.ensureVisibleAnimated(idx)
+    }
+
+    // Feed raw wheel deltas (either axis) into the stepped scroll. The row is
+    // horizontal, so the dominant axis wins: two-finger swipes left/right move
+    // it directly, up/down still works as a fallback.
+    function handleWheel(ax, ay, px, py) {
+        console.log("wheel angle=(" + ax + "," + ay + ") pixel=(" + px + "," + py + ")")
+        if (ax !== 0 || ay !== 0) {
+            scrollBy(-(Math.abs(ax) >= Math.abs(ay) ? ax : ay), 120)
+        } else {
+            scrollBy(-(Math.abs(px) >= Math.abs(py) ? px : py), 60)
+        }
+    }
+
+    Timer {
+        id: closeTimer
+        interval: 400
+        onTriggered: Qt.quit()
+    }
 
     FileView {
         path: Quickshell.shellPath("config.json")
@@ -72,223 +121,260 @@ PanelWindow {
         sortField: FolderListModel.Name
     }
 
-    MouseArea {
-        id: outsideClickArea
-        anchors.fill: parent
-        z: 0
-        onClicked: Qt.quit()
-    }
-
     Timer {
         id: emptyDelay
         interval: 300
         onTriggered: main.showEmpty = main.looksEmpty
     }
 
-    Column {
-        id: emptyState
-        anchors.centerIn: parent
-        spacing: 10
-        z: 2
-        visible: main.showEmpty
-
-        Text {
-            text: "No wallpapers found"
-            color: "#ffffff"
-            font.pixelSize: 22
-            font.bold: true
-            anchors.horizontalCenter: parent.horizontalCenter
-        }
-
-        Text {
-            text: "Add images to:"
-            color: "#aaaaaa"
-            font.pixelSize: 13
-            anchors.horizontalCenter: parent.horizontalCenter
-        }
-
-        TextEdit {
-            id: pathText
-            text: main.wallpaperPath
-            color: "#dddddd"
-            font.pixelSize: 14
-            readOnly: true
-            selectByMouse: true
-            anchors.horizontalCenter: parent.horizontalCenter
-            horizontalAlignment: Text.AlignHCenter
-        }
-    }
-
-    ListView {
-        id: list
+    Item {
+        id: stage
         width: parent.width
-        height: 500
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.verticalCenter: parent.verticalCenter
-        z: 1
-        focus: true
-        model: folderModel
-        orientation: ListView.Horizontal
-        spacing: 0
-        clip: true
-        cacheBuffer: 400
-        boundsBehavior: Flickable.StopAtBounds
+        height: parent.height
+        x: 0
+        transformOrigin: Item.Center
 
-        property int selectedIndex: main.startPosition
-        readonly property real tileWidth: width / configs.number_of_pictures - 10
-        readonly property real viewportCenterX: width / 2
-        readonly property real step: tileWidth + main.baseSpacing
-        readonly property real sideMargin: Math.max(0, viewportCenterX - tileWidth / 2)
-        property bool ready: false
-        property bool userMoved: false
+        property bool shown: false
+        opacity: shown ? 1.0 : 0.0
+        scale: shown ? 1.0 : 0.88
+        y: shown ? 0 : 48
 
-        leftMargin: sideMargin
-        rightMargin: sideMargin
-
-        function clampIndex(i) { return Math.max(0, Math.min(i, count - 1)) }
-        function ensureVisibleAnimated(i) { contentX = i * step }
-
-        function centerOnStart() {
-            if (userMoved || count <= 0 || configs.number_of_pictures <= 0) return
-            selectedIndex = clampIndex(main.startPosition)
-            contentX = selectedIndex * step
-            ready = true
+        Behavior on opacity {
+            NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
         }
 
-        function activateCurrent() {
-            Quickshell.execDetached(["bash", Quickshell.shellPath("commands.sh"), folderModel.get(selectedIndex, "filePath")])
-            Qt.quit()
+        Behavior on scale {
+            NumberAnimation { duration: 380; easing.type: Easing.OutCubic }
         }
 
-        function moveSelection(delta, speedMultiplier) {
-            anim.velocity = main.speed * speedMultiplier
-            selectedIndex = clampIndex(selectedIndex + delta)
-            ensureVisibleAnimated(selectedIndex)
+        Behavior on y {
+            NumberAnimation { duration: 380; easing.type: Easing.OutCubic }
         }
 
-        onCountChanged: centerOnStart()
-        onWidthChanged: centerOnStart()
-
-        Connections {
-            target: configs
-            function onNumber_of_picturesChanged() { list.centerOnStart() }
+        MouseArea {
+            id: outsideClickArea
+            anchors.fill: parent
+            z: 0
+            onClicked: main.close()
         }
 
-        Behavior on contentX {
-            enabled: list.ready
-            SmoothedAnimation { id: anim; property real velocity: main.speed; duration: main.animDuration }
+        Column {
+            id: emptyState
+            anchors.centerIn: parent
+            spacing: 10
+            z: 2
+            visible: main.showEmpty
+
+            Text {
+                text: "No wallpapers found"
+                color: "#ffffff"
+                font.pixelSize: 22
+                font.bold: true
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
+
+            Text {
+                text: "Add images to:"
+                color: "#aaaaaa"
+                font.pixelSize: 13
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
+
+            TextEdit {
+                id: pathText
+                text: main.wallpaperPath
+                color: "#dddddd"
+                font.pixelSize: 14
+                readOnly: true
+                selectByMouse: true
+                anchors.horizontalCenter: parent.horizontalCenter
+                horizontalAlignment: Text.AlignHCenter
+            }
         }
 
-        delegate: Item {
-            id: delegateItem
-            width: list.tileWidth
+        ListView {
+            id: list
+            width: parent.width
             height: 500
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.verticalCenter: parent.verticalCenter
+            z: 1
+            focus: true
+            model: folderModel
+            orientation: ListView.Horizontal
+            spacing: 0
+            clip: true
+            cacheBuffer: 400
+            boundsBehavior: Flickable.StopAtBounds
 
-            property bool active: index === list.selectedIndex
-            readonly property real baseWidth: list.tileWidth
-            readonly property real baseCenterX: x - list.contentX + baseWidth / 2
-            readonly property real distance: Math.abs(baseCenterX - list.viewportCenterX)
-            readonly property real fraction: Math.min(1, distance / list.viewportCenterX)
-            readonly property real compression: { const t = fraction; return t * t * t * t }
-            readonly property real edgeOffset: {
-                const amount = main.edgeSpacing * compression
-                return baseCenterX < list.viewportCenterX ? amount : -amount
+            property int selectedIndex: main.startPosition
+            readonly property real tileWidth: width / configs.number_of_pictures - 10
+            readonly property real viewportCenterX: width / 2
+            readonly property real step: tileWidth + main.baseSpacing
+            readonly property real sideMargin: Math.max(0, viewportCenterX - tileWidth / 2)
+            property bool ready: false
+            property bool userMoved: false
+
+            leftMargin: sideMargin
+            rightMargin: sideMargin
+
+            function clampIndex(i) { return Math.max(0, Math.min(i, count - 1)) }
+            function ensureVisibleAnimated(i) { contentX = i * step }
+
+            function centerOnStart() {
+                if (userMoved || count <= 0 || configs.number_of_pictures <= 0) return
+                selectedIndex = clampIndex(main.startPosition)
+                contentX = selectedIndex * step
+                ready = true
             }
-            readonly property real scaleFactor: {
-                const t = 1 - fraction * fraction * (3 - 2 * fraction)
-                return main.edgeScale + (main.zoomScale - main.edgeScale) * t
+
+            function activateCurrent() {
+                Quickshell.execDetached(["bash", Quickshell.shellPath("commands.sh"), folderModel.get(selectedIndex, "filePath")])
+                main.close()
             }
 
-            Item {
-                id: content
-                anchors.verticalCenter: parent.verticalCenter
-                width: delegateItem.baseWidth * delegateItem.scaleFactor
-                height: delegateItem.height * Math.min(1, delegateItem.scaleFactor)
-                x: (delegateItem.baseWidth - width) / 2 + delegateItem.edgeOffset
+            function moveSelection(delta, speedMultiplier) {
+                anim.velocity = main.speed * speedMultiplier
+                selectedIndex = clampIndex(selectedIndex + delta)
+                ensureVisibleAnimated(selectedIndex)
+            }
 
-                Image {
-                    id: shadowImage
-                    x: main.shadowX
-                    y: main.shadowY
-                    width: parent.width
-                    height: parent.height
-                    source: img.source
-                    sourceSize.width: img.sourceSize.width
-                    sourceSize.height: img.sourceSize.height
-                    fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
-                    cache: false
-                    smooth: true
-                    visible: main.shadowEnabled
-                    opacity: main.shadowOpacity
-                    layer.enabled: true
-                    layer.effect: MultiEffect { brightness: -1; blurEnabled: true; blur: main.shadowBlur }
-                    transform: Shear { xFactor: main.skewFactor }
+            onCountChanged: centerOnStart()
+            onWidthChanged: centerOnStart()
+
+            Connections {
+                target: configs
+                function onNumber_of_picturesChanged() { list.centerOnStart() }
+            }
+
+            Behavior on contentX {
+                enabled: list.ready
+                SmoothedAnimation { id: anim; property real velocity: main.speed; duration: main.animDuration }
+            }
+
+            delegate: Item {
+                id: delegateItem
+                width: list.tileWidth
+                height: 500
+
+                property bool active: index === list.selectedIndex
+                readonly property real baseWidth: list.tileWidth
+                readonly property real baseCenterX: x - list.contentX + baseWidth / 2
+                readonly property real distance: Math.abs(baseCenterX - list.viewportCenterX)
+                readonly property real fraction: Math.min(1, distance / list.viewportCenterX)
+                readonly property real compression: { const t = fraction; return t * t * t * t }
+                readonly property real edgeOffset: {
+                    const amount = main.edgeSpacing * compression
+                    return baseCenterX < list.viewportCenterX ? amount : -amount
+                }
+                readonly property real scaleFactor: {
+                    const t = 1 - fraction * fraction * (3 - 2 * fraction)
+                    return main.edgeScale + (main.zoomScale - main.edgeScale) * t
                 }
 
-                Text {
-                    id: alt
-                    text: ""
-                    color: configs.border_color
-                    anchors.centerIn: parent
-                    font.pixelSize: 16
-                    transform: Shear { xFactor: main.skewFactor }
-                }
+                Item {
+                    id: content
+                    anchors.verticalCenter: parent.verticalCenter
+                    transformOrigin: Item.Center
+                    scale: delegateItem.active ? 1.06 : 1.0
+                    Behavior on scale {
+                        NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+                    }
+                    width: delegateItem.baseWidth * delegateItem.scaleFactor
+                    height: delegateItem.height * Math.min(1, delegateItem.scaleFactor)
+                    x: (delegateItem.baseWidth - width) / 2 + delegateItem.edgeOffset
 
-                Image {
-                    id: img
-                    anchors.fill: parent
-                    opacity: 0.95
-                    fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
-                    cache: false
-                    smooth: true
-                    source: "file://" + main.cachePath + fileName
-                    sourceSize.width: delegateItem.baseWidth * main.zoomScale
-                    sourceSize.height: delegateItem.height
-                    transform: Shear { xFactor: main.skewFactor }
-
-                    Timer {
-                        id: retryTimer
-                        interval: 1000
-                        repeat: false
-                        onTriggered: { const s = img.source; img.source = ""; img.source = s }
+                    Image {
+                        id: shadowImage
+                        x: main.shadowX
+                        y: main.shadowY
+                        width: parent.width
+                        height: parent.height
+                        source: img.source
+                        sourceSize.width: img.sourceSize.width
+                        sourceSize.height: img.sourceSize.height
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        cache: false
+                        smooth: true
+                        visible: main.shadowEnabled
+                        opacity: main.shadowOpacity
+                        layer.enabled: true
+                        layer.effect: MultiEffect { brightness: -1; blurEnabled: true; blur: main.shadowBlur }
+                        transform: Shear { xFactor: main.skewFactor }
                     }
 
-                    onStatusChanged: {
-                        if (status === Image.Error) { alt.text = "Caching"; retryTimer.start() }
+                    Text {
+                        id: alt
+                        text: ""
+                        color: configs.border_color
+                        anchors.centerIn: parent
+                        font.pixelSize: 16
+                        transform: Shear { xFactor: main.skewFactor }
+                    }
+
+                    Image {
+                        id: img
+                        anchors.fill: parent
+                        opacity: 0.95
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        cache: false
+                        smooth: true
+                        source: "file://" + main.cachePath + fileName
+                        sourceSize.width: delegateItem.baseWidth * main.zoomScale
+                        sourceSize.height: delegateItem.height
+                        transform: Shear { xFactor: main.skewFactor }
+
+                        Timer {
+                            id: retryTimer
+                            interval: 1000
+                            repeat: false
+                            onTriggered: { const s = img.source; img.source = ""; img.source = s }
+                        }
+
+                        onStatusChanged: {
+                            if (status === Image.Error) { alt.text = "Caching"; retryTimer.start() }
+                        }
+                    }
+
+                    Rectangle {
+                        z: 10
+                        anchors.fill: parent
+                        color: "transparent"
+                        border.width: 2
+                        border.color: configs.border_color
+                        opacity: delegateItem.active ? 1 : 0
+                        Behavior on opacity {
+                            NumberAnimation { duration: 130; easing.type: Easing.OutCubic }
+                        }
+                        transform: Shear { xFactor: main.skewFactor }
                     }
                 }
 
-                Rectangle {
-                    z: 10
+                MouseArea {
                     anchors.fill: parent
-                    visible: delegateItem.active
-                    color: "transparent"
-                    border.width: 2
-                    border.color: configs.border_color
-                    transform: Shear { xFactor: main.skewFactor }
+                    hoverEnabled: list.ready
+                    onEntered: { list.userMoved = true; list.selectedIndex = index }
+                    onClicked: list.activateCurrent()
+                    onWheel: function(wheel) {
+                        main.handleWheel(wheel.angleDelta.x, wheel.angleDelta.y,
+                                         wheel.pixelDelta.x, wheel.pixelDelta.y)
+                        wheel.accepted = true
+                    }
                 }
             }
 
-            MouseArea {
-                anchors.fill: parent
-                hoverEnabled: list.ready
-                onEntered: { list.userMoved = true; list.selectedIndex = index }
-                onClicked: list.activateCurrent()
-                onWheel: function(wheel) { list.flick(-wheel.angleDelta.y * 8, 0); wheel.accepted = true }
+            Keys.onPressed: function(event) {
+                if (event.key === Qt.Key_Space) {
+                    activateCurrent()
+                } else if (event.key === Qt.Key_W || event.key === Qt.Key_Escape) {
+                    main.close()
+                } else {
+                    return
+                }
+                event.accepted = true
             }
-        }
-
-        Keys.onPressed: function(event) {
-            if (event.key === Qt.Key_Space) {
-                activateCurrent()
-            } else if (event.key === Qt.Key_W || event.key === Qt.Key_Escape) {
-                Qt.quit()
-            } else {
-                return
-            }
-            event.accepted = true
         }
     }
 }

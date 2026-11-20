@@ -1,0 +1,14 @@
+[Unit]
+Description=OmniRoute AI gateway (local LLM router, port 20128)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/omniroute serve --no-open --no-tray --no-recovery
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target

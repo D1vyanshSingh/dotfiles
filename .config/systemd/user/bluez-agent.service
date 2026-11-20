@@ -1,0 +1,11 @@
+[Unit]
+Description=BlueZ pairing agent (auto-confirm Just Works)
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/dotfiles/.config/bluez-agent/bluez-agent.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -4,3 +4,7 @@
 .config/kitty/matugen.conf
 .config/rofi/colors.rasi
 .config/quickshell/state/
+
+# python caches from helper scripts (bluez-agent)
+__pycache__/
+*.pyc

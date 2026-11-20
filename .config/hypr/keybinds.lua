@@ -7,13 +7,26 @@ local home = os.getenv("HOME")
 local menu = "rofi -show drun"
 
 hl.bind(mainMod .. " + T", hl.dsp.exec_cmd(terminal)) 
-hl.bind(mainMod .. " + D", hl.dsp.exec_cmd("pgrep -x rofi >/dev/null && pkill -x rofi || " .. menu)) -- Toggle launcher
+-- App launcher on bare Super (Win) key: fires on release when no other key was pressed
+hl.bind(mainMod .. " + SUPER_L", hl.dsp.exec_cmd("pgrep -x rofi >/dev/null && pkill -x rofi || " .. menu), { release = true }) -- Toggle launcher
 hl.bind(mainMod .. " + S", hl.dsp.exec_cmd("qs ipc call wheel toggle")) -- Wheel launcher
 hl.bind(mainMod .. " + E", hl.dsp.exec_cmd(fileManager))
 hl.bind(mainMod .. " + B", hl.dsp.exec_cmd(browser))
+hl.bind(mainMod .. " + SHIFT + B", hl.dsp.exec_cmd(chrome)) -- Chrome
 hl.bind(mainMod .. " + Q", hl.dsp.window.close())
 
 hl.bind(mainMod .. " + Tab", hl.dsp.exec_cmd("hyprlock")) -- Lock screen
+
+-- Alt+Tab window switcher: hold Alt, press Tab to cycle windows, release Alt to keep it
+hl.bind("ALT + Tab", function()
+    hl.dispatch(hl.dsp.window.cycle_next()) -- Change focus to another window
+    hl.dispatch(hl.dsp.window.bring_to_top()) -- Raise it above the others
+end)
+
+-- Minimize: park the active window on the hidden "minimized" special workspace
+hl.bind(mainMod .. " + SHIFT + M", hl.dsp.window.move({ workspace = "special:minimized", follow = false }))
+-- Restore: toggle the overlay showing the minimized windows
+hl.bind(mainMod .. " + M", hl.dsp.workspace.toggle_special("minimized"))
 
 hl.bind(mainMod .. " + GRAVE", hl.dsp.exec_cmd("qs ipc call powermenu toggle")) -- Power menu
 
@@ -31,6 +44,8 @@ hl.bind(mainMod .. " + N", hl.dsp.exec_cmd("qs ipc call notifications toggle")) 
 
 hl.bind(mainMod .. " + C", hl.dsp.exec_cmd("qs ipc call todo toggle"))  -- To-do
 
+hl.bind(mainMod .. " + G", hl.dsp.exec_cmd("qs ipc call calendar toggle")) -- Calendar
+
 -- Mouse move/resize window
 hl.bind(mainMod .. " + mouse:272", hl.dsp.window.drag(), { mouse = true })
 hl.bind(mainMod .. " + mouse:273", hl.dsp.window.resize(), { mouse = true })
@@ -44,6 +59,8 @@ hl.bind(mainMod .. " + V", hl.dsp.exec_cmd("pgrep -x rofi >/dev/null && pkill -x
 hl.bind("Delete", hl.dsp.exec_cmd("sh -c 'file=" .. home .. "/Pictures/$(date +%s).png; grim \"$file\"; wl-copy < \"$file\"; qs ipc call screenshot notify \"$file\"'"))
 -- Screenshot area select
 hl.bind("SHIFT + Delete", hl.dsp.exec_cmd("sh -c 'file=" .. home .. "/Pictures/$(date +%s).png; grim -g \"$(slurp)\" \"$file\"; wl-copy < \"$file\"; qs ipc call screenshot notify \"$file\"'"))
+-- Screenshot area select like Windows Win+Shift+S
+hl.bind(mainMod .. " + SHIFT + S", hl.dsp.exec_cmd("sh -c 'file=" .. home .. "/Pictures/$(date +%s).png; grim -g \"$(slurp)\" \"$file\"; wl-copy < \"$file\"; qs ipc call screenshot notify \"$file\"'"))
 
 -- Keyboard layout
 hl.bind(mainMod .. " + X", hl.dsp.exec_cmd("hyprctl switchxkblayout current next"))

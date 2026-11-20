@@ -50,24 +50,29 @@ Just made some tweaks to it. Give it some love: [hyprquickpaper](https://github.
 | -----------             | ------------------------- |
 | `Super + T`             | Terminal                  |
 | `Super + Q`             | Close active window       |
-| `Super + D`             | Application launcher      |
+| `Super`                 | Application launcher      |
 | `Super + Space`         | Toggle floating window    |
 | `Super + F`             | Toggle fullscreen         |
 | `Super + 1, 2, 3..`     | Change workspaces         |
 | `Super + Shift + 1, 2..`| Move window to workspace  |
 | `Super + E`             | File manager              |
-| `Super + B`             | Browser                   |
+| `Super + B`             | Browser (Firefox)         |
+| `Super + Shift + B`     | Chrome                    |
 | `Super + V`             | Clipboard history         |
 | `Super + S`             | Second launcher           |
 | `Super + I`             | Settings menu             |
 | `Super + W`             | Wallpaper selector        |
 | `Super + O`             | Switch opacity            |
 | `Super + Tab`           | Lock screen               |
+| `Alt + Tab`             | Switch window (alt-tab)   |
+| `Super + Shift + M`     | Minimize window           |
+| `Super + M`             | Show minimized windows    |
 | `Super + Grave`         | Logout menu               |
 | `Super + Shift + W`     | Toggle bar                |
 | `Super + Mouse wheel`   | Zoom in/out               |
 | `Super + C`             | Notes/To-do               |
 | `Super + N`             | Notifications             |
+| `Super + G`             | Calendar                  |
 | `Delete`                | Screenshot fullscreen     |
 | `SHIFT + Delete`        | Screenshot area select    |
 

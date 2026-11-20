@@ -218,12 +218,9 @@ Item {
         }
     }
 
-    function setResolution(mon, resolution) {
-        if (!mon || !mon.name || !resolution) {
-            return
-        }
+    function setMode(mon, resolution, rate) {
         const lua = monitorLua(mon, {
-            mode: resolution,
+            mode: resolution + "@" + rate,
             position: mon.x + "x" + mon.y,
             scale: mon.scale !== undefined ? mon.scale : 1
         })
@@ -231,6 +228,42 @@ Item {
             pResolution.command = ["hyprctl", "eval", lua]
             pResolution.running = true
         } catch (error) {}
+    }
+
+    function ratesFor(mon, resolution) {
+        if (!mon || !mon.availableModes) return []
+        const rates = []
+        for (let i = 0; i < mon.availableModes.length; i++) {
+            const parts = String(mon.availableModes[i]).split("@")
+            if (parts.length < 2 || parts[0] !== resolution) continue
+            const rate = Math.round(parseFloat(parts[1]))
+            if (!isNaN(rate) && rates.indexOf(rate) === -1) rates.push(rate)
+        }
+        rates.sort((a, b) => a - b)
+        return rates
+    }
+
+    function currentResolution(mon) { return mon.width + "x" + mon.height }
+
+    function currentRate(mon) { return Math.round(mon.refreshRate) }
+
+    function setResolution(mon, resolution) {
+        if (!mon || !mon.name || !resolution) {
+            return
+        }
+        const rates = ratesFor(mon, resolution)
+        const current = currentRate(mon)
+        const rate = rates.length === 0 || rates.indexOf(current) !== -1
+            ? current
+            : rates[rates.length - 1]
+        setMode(mon, resolution, rate)
+    }
+
+    function setRefreshRate(mon, rate) {
+        if (!mon || !mon.name || !rate) {
+            return
+        }
+        setMode(mon, currentResolution(mon), rate)
     }
 
     Timer { id: refreshTimer; interval: 250; onTriggered: page.refresh() }
@@ -447,11 +480,82 @@ Item {
                                         page.refresh()
                                         return
                                     }
-                                    page.setResolution(page.monitors[0], modelData + "@60")
+                                    page.setResolution(page.monitors[0], modelData)
                                 }
                             }
                         }
                     }
+                }
+            }
+
+            Column {
+                width: parent.width; spacing: 10
+                topPadding: 6
+                bottomPadding: 6
+
+                Text {
+                    text: "REFRESH RATE"; color: Theme.text
+                    font.family: Theme.fontFamily; font.pixelSize: 15; font.bold: true; font.letterSpacing: 2
+                }
+
+                Row {
+                    id: refreshRow
+                    width: parent.width; spacing: 10
+                    topPadding: 6
+                    bottomPadding: 6
+
+                    readonly property var selectedMon: page.monitors.length > 0 ? page.monitors[0] : null
+                    readonly property var rates: page.ratesFor(selectedMon, selectedMon ? page.currentResolution(selectedMon) : "")
+
+                    Repeater {
+                        model: refreshRow.rates
+
+                        delegate: Rectangle {
+                            required property int modelData
+                            readonly property bool active: refreshRow.selectedMon !== null &&
+                                Math.abs(refreshRow.selectedMon.refreshRate - modelData) < 1
+
+                            width: (refreshRow.width - refreshRow.spacing * (refreshRow.rates.length - 1)) / Math.max(1, refreshRow.rates.length)
+                            height: 42; radius: Theme.radius
+                            color: active ? Theme.alpha(Theme.accent2, 0.10) : "#00000000"
+                            border.width: 1
+                            border.color: active ? Theme.accent2 : Theme.border
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: modelData + " Hz"
+                                color: active ? Theme.accent2 : Theme.text
+                                font.family: Theme.fontFamily; font.pixelSize: 12; font.bold: true; font.letterSpacing: 1
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent; hoverEnabled: true
+                                onEntered: {
+                                    if (active) return
+                                    parent.color = Theme.alpha(Theme.accent, 0.08)
+                                    parent.border.color = Theme.accent
+                                }
+                                onExited: {
+                                    if (active) return
+                                    parent.color = "#00000000"
+                                    parent.border.color = Theme.border
+                                }
+                                onClicked: {
+                                    if (refreshRow.selectedMon === null) {
+                                        page.refresh()
+                                        return
+                                    }
+                                    page.setRefreshRate(refreshRow.selectedMon, modelData)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    visible: refreshRow.rates.length === 0
+                    text: "No alternative modes reported by the monitor"; color: Theme.textDim
+                    font.family: Theme.fontFamily; font.pixelSize: 11
                 }
             }
         }

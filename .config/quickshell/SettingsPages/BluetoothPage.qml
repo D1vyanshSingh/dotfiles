@@ -8,6 +8,8 @@ Item {
 
     readonly property BluetoothAdapter adapter: Bluetooth.defaultAdapter
     readonly property bool powered: adapter ? adapter.enabled : false
+    readonly property bool blocked:
+        adapter ? adapter.state === BluetoothAdapterState.Blocked : false
     readonly property bool scanning: adapter ? adapter.discovering : false
     property string statusText: ""
     property real marginLeft: 0
@@ -15,8 +17,9 @@ Item {
     property real marginTop: 0
     property real marginBottom: 0
 
-    function setStatus(text) {
+    function setStatus(text, hold) {
         page.statusText = text
+        statusTimer.interval = hold === undefined ? 3000 : hold
         statusTimer.restart()
     }
 
@@ -51,8 +54,7 @@ Item {
             return
         }
 
-        BluetoothState.reconnectPaused = false
-        page.adapter.enabled = true
+        BluetoothState.powerOn()
     }
 
     Timer {
@@ -61,10 +63,17 @@ Item {
         onTriggered: if (page.adapter) page.adapter.enabled = false
     }
 
+    // The attempt the user started, so a row that never resolves can be
+    // reported and released instead of sitting on "CONNECTING..." forever.
+    property string pendingAddress: ""
+    property string pendingName: ""
+    property int pendingTicks: 0
+    property bool pendingConnected: false
+
     function deviceAction(dev) {
         if (!dev) return
 
-        var name = dev.name || dev.address || "device"
+        var name = BluetoothState.displayName(dev)
 
         if (dev.state === BluetoothDeviceState.Connected) {
             setStatus("Disconnecting " + name + "...")
@@ -74,7 +83,12 @@ Item {
         }
 
         if (dev.state === BluetoothDeviceState.Connecting) {
-            setStatus("Connecting to " + name + "...")
+            // Let a pending attempt be abandoned, otherwise a device that went
+            // out of range leaves the row stuck on CONNECTING...
+            setStatus("Cancelled " + name)
+            dev.cancelPair()
+            dev.disconnect()
+            page.clearPending()
             return
         }
 
@@ -85,8 +99,75 @@ Item {
 
         setDiscovering(false)
         dev.trusted = true
-        setStatus("Connecting to " + name + "...")
-        dev.connect()
+
+        page.pendingAddress = dev.address
+        page.pendingName = name
+        page.pendingTicks = 0
+        page.pendingConnected = false
+
+        if (dev.paired) {
+            setStatus("Connecting to " + name + "...")
+            dev.connect()
+        } else {
+            // BlueZ cannot finish a pairing without a registered agent;
+            // bluez-agent.service provides one. Connect once the bond exists.
+            setStatus("Pairing with " + name + "...")
+            dev.pair()
+        }
+
+        pendingTimer.start()
+    }
+
+    function clearPending() {
+        page.pendingAddress = ""
+        page.pendingName = ""
+        page.pendingTicks = 0
+        page.pendingConnected = false
+        pendingTimer.stop()
+    }
+
+    function pendingTick() {
+        if (page.pendingAddress === "")
+            return page.clearPending()
+
+        page.pendingTicks += 1
+
+        var devs = BluetoothState.deviceList()
+        var dev = null
+        for (var i = 0; i < devs.length; i++) {
+            if (devs[i].address === page.pendingAddress)
+                dev = devs[i]
+        }
+
+        if (!dev)
+            return page.clearPending()
+
+        if (dev.state === BluetoothDeviceState.Connected) {
+            setStatus("Connected to " + page.pendingName)
+            return page.clearPending()
+        }
+
+        // Bond exists but BlueZ did not auto-connect; kick it once.
+        if (dev.paired && !page.pendingConnected
+                && dev.state === BluetoothDeviceState.Disconnected) {
+            page.pendingConnected = true
+            dev.connect()
+        }
+
+        // ~15s budget, then hand the row back with an explanation.
+        if (page.pendingTicks > 25) {
+            setStatus("Couldn't connect to " + page.pendingName, 8000)
+            dev.cancelPair()
+            dev.disconnect()
+            page.clearPending()
+        }
+    }
+
+    Timer {
+        id: pendingTimer
+        interval: 600
+        repeat: true
+        onTriggered: page.pendingTick()
     }
 
     function removeDevice(dev) {
@@ -168,8 +249,14 @@ Item {
 
             Text {
                 anchors.centerIn: parent
-                text: page.powered ? "BLUETOOTH ON" : "BLUETOOTH OFF"
-                color: page.powered ? Theme.accent : Theme.textFaint
+                text: !page.adapter ? "NO BLUETOOTH ADAPTER"
+                    : page.powered ? "BLUETOOTH ON"
+                    : page.blocked ? "BLUETOOTH BLOCKED — TAP TO UNBLOCK"
+                    : "BLUETOOTH OFF"
+                color: page.blocked && !page.powered
+                    ? Theme.danger
+                    : page.powered ? Theme.accent
+                    : Theme.textFaint
                 font.family: Theme.fontFamily
                 font.pixelSize: 10
                 font.bold: true
@@ -241,7 +328,7 @@ Item {
 
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            text: "BLUETOOTH IS OFF"
+                            text: page.blocked ? "BLUETOOTH IS BLOCKED" : "BLUETOOTH IS OFF"
                             color: Theme.textDim
                             font.family: Theme.fontFamily
                             font.pixelSize: 11
@@ -412,7 +499,7 @@ Item {
                                 y: (parent.height - height) / 2
                                 width: 18
                                 height: 18
-                                text: "\uf294"
+                                text: BluetoothState.deviceIcon(card.modelData)
                                 color: card.isConnected
                                     ? Theme.accent
                                     : Theme.textDim
@@ -430,8 +517,7 @@ Item {
 
                                 Text {
                                     width: parent.width
-                                    text: card.modelData.name ||
-                                          card.modelData.address
+                                    text: BluetoothState.displayName(card.modelData)
                                     elide: Text.ElideRight
                                     color: Theme.text
                                     font.family: Theme.fontFamily
@@ -442,12 +528,19 @@ Item {
                                     width: parent.width
 
                                     text: {
-                                        var parts = [card.modelData.address]
+                                        var parts = []
+
+                                        // Only fall back to the MAC when BlueZ never
+                                        // learned a name, so rows stay distinguishable.
+                                        if (BluetoothState.friendlyName(card.modelData) === "")
+                                            parts.push(card.modelData.address)
 
                                         if (card.isConnected)
                                             parts.push("connected")
                                         else if (card.modelData.paired)
                                             parts.push("paired")
+                                        else
+                                            parts.push("not paired")
 
                                         if (card.modelData.batteryAvailable)
                                             parts.push(

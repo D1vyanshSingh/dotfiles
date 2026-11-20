@@ -63,3 +63,15 @@ ZSH_HIGHLIGHT_STYLES[unknown-token]='fg=245'
 
 # 43PR theme controller
 theme() { python3 "$HOME/.config/43pr/bin/theme.py" "$@"; }
+
+# spicetify + user binaries
+export PATH="$HOME/.local/bin:$PATH"
+
+# --------------------------------------------------
+# AI router — Claude Code via local OmniRoute (:20128)
+# --------------------------------------------------
+# Gateway runs as a user service: systemctl --user {start,stop,status} omniroute
+alias omniroute-dashboard='xdg-open http://127.0.0.1:20128/dashboard'
+alias omniroute-logs='journalctl --user -u omniroute -f'
+# claude is a plain binary on ~/.local/bin; its gateway/model config lives in
+# ~/.claude/settings.json (ANTHROPIC_BASE_URL -> OmniRoute, model -> freecode combo)

@@ -26,6 +26,124 @@ Singleton {
 
     function init() {}
 
+    // --- power ---------------------------------------------------------------
+    // A soft rfkill block (Lenovo WMI switch, or a state restored by
+    // systemd-rfkill at boot) makes BlueZ reject Adapter1.Powered = true, so the
+    // adapter just stays off with no error surfaced. Unblock, then retry.
+    property int powerAttempts: 0
+
+    function powerOn() {
+        if (!root.adapter)
+            return
+        root.reconnectPaused = false
+        root.powerAttempts = 0
+
+        // Only BlueZ's PowerState reports "off-blocked"; the unblock itself has to
+        // go through /dev/rfkill, which the session user is allowed to write.
+        if (rfkillUnblock.running)
+            rfkillUnblock.running = false
+        rfkillUnblock.running = true
+    }
+
+    Process {
+        id: rfkillUnblock
+        command: ["rfkill", "unblock", "bluetooth"]
+        onExited: root.attemptPowerOn()
+    }
+
+    function attemptPowerOn() {
+        if (!root.adapter || root.adapter.enabled)
+            return
+        if (root.powerAttempts >= 3)
+            return
+        root.powerAttempts += 1
+        root.adapter.enabled = true
+        powerOnRetry.restart()
+    }
+
+    Timer {
+        id: powerOnRetry
+        interval: 900
+        onTriggered: if (root.adapter && !root.adapter.enabled) root.attemptPowerOn()
+    }
+
+    // --- naming --------------------------------------------------------------
+    // BlueZ reports Alias == "AA-BB-CC-DD-EE-FF" until the device advertises its
+    // GAP name, and Quickshell's `name` mirrors that alias, so a row can end up
+    // titled with a raw MAC. Prefer the real remote name, then a class label.
+    function isMacLike(text) {
+        if (!text)
+            return true
+        return /^[0-9A-Fa-f]{2}([-:]?[0-9A-Fa-f]{2}){5}$/.test(String(text).trim())
+    }
+
+    function friendlyName(dev) {
+        if (!dev)
+            return ""
+        var candidates = [dev.deviceName, dev.name]
+        for (var i = 0; i < candidates.length; i++) {
+            var c = candidates[i]
+            if (c && !root.isMacLike(c))
+                return c
+        }
+        return ""
+    }
+
+    function deviceKind(dev) {
+        var icon = dev && dev.icon ? String(dev.icon) : ""
+
+        if (icon.indexOf("headset") >= 0)
+            return "Headset"
+        if (icon.indexOf("headphone") >= 0)
+            return "Headphones"
+        if (icon.indexOf("keyboard") >= 0)
+            return "Keyboard"
+        if (icon.indexOf("mouse") >= 0)
+            return "Mouse"
+        if (icon.indexOf("gaming") >= 0 || icon.indexOf("joystick") >= 0)
+            return "Gamepad"
+        if (icon.indexOf("phone") >= 0)
+            return "Phone"
+        if (icon.indexOf("computer") >= 0)
+            return "Computer"
+        if (icon.indexOf("watch") >= 0)
+            return "Watch"
+        if (icon.indexOf("printer") >= 0)
+            return "Printer"
+        if (icon.indexOf("speaker") >= 0 || icon.indexOf("audio") >= 0)
+            return "Speaker"
+
+        return "Bluetooth device"
+    }
+
+    function displayName(dev) {
+        var name = root.friendlyName(dev)
+        return name !== "" ? name : root.deviceKind(dev)
+    }
+
+    function deviceIcon(dev) {
+        var icon = dev && dev.icon ? String(dev.icon) : ""
+
+        if (icon.indexOf("headset") >= 0 || icon.indexOf("headphone") >= 0)
+            return "\uf025"
+        if (icon.indexOf("keyboard") >= 0)
+            return "\uf11c"
+        if (icon.indexOf("mouse") >= 0)
+            return "\uefba"
+        if (icon.indexOf("gaming") >= 0 || icon.indexOf("joystick") >= 0)
+            return "\uf11b"
+        if (icon.indexOf("phone") >= 0)
+            return "\uf10b"
+        if (icon.indexOf("computer") >= 0)
+            return "\uf109"
+        if (icon.indexOf("printer") >= 0)
+            return "\uf02f"
+        if (icon.indexOf("speaker") >= 0 || icon.indexOf("audio") >= 0)
+            return "\uf028"
+
+        return "\uf294"
+    }
+
     Process {
         command: ["mkdir", "-p", root.stateDir]
         running: true
@@ -135,6 +253,11 @@ Singleton {
             if (!d.address || root.rememberedDevices.indexOf(d.address) < 0)
                 continue
             if (root.removingDevices[d.address])
+                continue
+            // Never auto-connect something that was never bonded: BlueZ has no
+            // agent work to do, the attempt hangs, and the row sticks on
+            // "CONNECTING..." until the shell restarts.
+            if (!d.paired)
                 continue
             if (d.pairing)
                 continue

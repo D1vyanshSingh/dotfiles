@@ -354,6 +354,25 @@ else
 fi
 
 # --------------------------------------------------
+# Enable polkit agent (admin auth prompts)
+# --------------------------------------------------
+
+if command -v systemctl >/dev/null 2>&1; then
+    if pacman -Qi hyprpolkitagent >/dev/null 2>&1; then
+        info "Enabling hyprpolkitagent..."
+
+        # No --now: the unit is gated on WAYLAND_DISPLAY and starts with the session.
+        if systemctl --user enable hyprpolkitagent.service; then
+            success "hyprpolkitagent enabled."
+        else
+            warning "Failed to enable hyprpolkitagent."
+        fi
+    else
+        warning "hyprpolkitagent is not installed; privileged actions will not prompt."
+    fi
+fi
+
+# --------------------------------------------------
 # Enable system services
 # --------------------------------------------------
 

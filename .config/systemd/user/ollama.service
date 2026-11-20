@@ -1,0 +1,15 @@
+[Unit]
+Description=Ollama Service
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/ollama serve
+Environment="HOME=/home/div"
+Environment="OLLAMA_MODELS=/run/media/div/New Volume/ollama-models"
+Environment="OLLAMA_VULKAN=true"
+Environment="OLLAMA_NUM_PARALLEL=1"
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
