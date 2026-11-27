@@ -1089,10 +1089,14 @@ Scope {
 
                         // horizontal: scrolling title
                         Item {
+                            id: mediaMarquee
                             visible: cfg.showMedia && !root.vertical && Marquee.player !== null && Marquee.title !== ""
                             Layout.alignment: Qt.AlignCenter
                             implicitWidth: Math.min(Marquee.textW, Marquee.maxW) + 20
                             implicitHeight: 18
+
+                            // hand the panel this widget's place on screen, so the
+                            // card can hang from it rather than from the middle
 
                             Item {
                                 anchors.fill: parent
@@ -1131,14 +1135,33 @@ Scope {
                             MouseArea {
                                 anchors.fill: parent
                                 acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                // left is the door to the panel, where play/pause and
+                                // everything else lives; the other buttons stay skips
                                 onClicked: mouse => {
+                                    if (mouse.button === Qt.LeftButton) {
+                                        Quickshell.execDetached(["qs", "ipc", "call", "music", "toggle"]);
+                                        return;
+                                    }
                                     const p = Marquee.player;
                                     if (!p) return;
-                                    if (mouse.button === Qt.LeftButton) p.togglePlaying();
-                                    else if (mouse.button === Qt.RightButton) p.next();
+                                    if (mouse.button === Qt.RightButton) p.next();
                                     else p.previous();
                                 }
                             }
+
+                            function syncAnchor() {
+                                const p = bar.contentItem.mapFromItem(mediaMarquee, mediaMarquee.width / 2, mediaMarquee.height)
+                                MusicAnchor.center = p.x
+                                MusicAnchor.bottom = p.y
+                                MusicAnchor.valid = mediaMarquee.visible && mediaMarquee.width > 0
+                            }
+
+                            onXChanged: syncAnchor()
+                            onWidthChanged: syncAnchor()
+                            onVisibleChanged: if (visible) syncAnchor()
+                            Component.onCompleted: syncAnchor()
                         }
 
                         // vertical: compact media button
@@ -1147,10 +1170,13 @@ Scope {
                             text: "\u266A"
                             baseSize: root.sizeVolIcon - 2
                             onClicked: mouse => {
+                                if (mouse.button === Qt.LeftButton) {
+                                    Quickshell.execDetached(["qs", "ipc", "call", "music", "toggle"]);
+                                    return;
+                                }
                                 const p = Marquee.player;
                                 if (!p) return;
-                                if (mouse.button === Qt.LeftButton) p.togglePlaying();
-                                else if (mouse.button === Qt.RightButton) p.next();
+                                if (mouse.button === Qt.RightButton) p.next();
                                 else p.previous();
                             }
                         }
@@ -1165,7 +1191,9 @@ Scope {
                             glyph: muted || vol <= 0 ? "\uDB81\uDF5F"
                                  : vol > 0.66 ? "\uDB81\uDD7E"
                                  : vol > 0.33 ? "\uDB81\uDD80" : "\uDB81\uDD7F"
-                            text: root.menubar ? "" : (muted ? "Muted" : Math.round(vol * 100) + "%")
+                            // the reading sits beside the speaker on every bar style,
+                            // the menubar included — the icon alone doesn't say 30% or 80%
+                            text: muted ? "Muted" : Math.round(vol * 100) + "%"
                             vtext: ""
                             color: muted ? Theme.danger : Theme.text
                             onScrolled: delta => {

@@ -43,3 +43,7 @@ hl.animation({ leaf = "border",     enabled = true, speed = 5, bezier = "default
 hl.animation({ leaf = "fade",       enabled = true, speed = 4, bezier = "default" })
 hl.animation({ leaf = "workspaces", enabled = true, speed = 7, bezier = "default", style = "slidefade" })
 
+-- Special workspaces slide in from the left. The offset is one panel width,
+-- so the Spotify panel travels just its own width instead of a full screen.
+hl.animation({ leaf = "specialWorkspace", enabled = true, speed = 6, bezier = "easeOut", style = "slidefade -33%" })
+

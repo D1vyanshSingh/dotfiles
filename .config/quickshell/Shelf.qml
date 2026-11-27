@@ -283,12 +283,19 @@ Scope {
                         Text {
                             id: chipText
                             anchors.centerIn: parent
+                            // the name slides aside when the cross comes out
+                            // rather than re-eliding: its box never changes
+                            // width, so the text does not jump under the pointer
+                            anchors.horizontalCenterOffset: dismiss.armed ? -7 : 0
                             width: Math.min(parent.width - 18, implicitWidth)
                             text: chip.modelData.name
                             color: Qt.rgba(1, 1, 1, 0.82)
                             font.family: "JetBrains Mono"
                             font.pixelSize: 9
                             elide: Text.ElideMiddle
+                            Behavior on anchors.horizontalCenterOffset {
+                                NumberAnimation { duration: 130; easing.type: Easing.OutCubic }
+                            }
                         }
 
                         MouseArea {
@@ -327,6 +334,70 @@ Scope {
                                 if (m.button === Qt.LeftButton) root.pasteAt(chip.index)
                                 else if (m.button === Qt.RightButton) root.copyUri(chip.index)
                                 else root.removeAt(chip.index)
+                            }
+                        }
+
+                        // ── the way out ──
+                        // hover a chip and a cross fades in at its edge; click it
+                        // and the item is gone, no middle-click folklore.
+                        // declared after the chip's drag area on purpose: QML
+                        // hands the press to the topmost sibling, so a press on
+                        // the cross can never start a drag of what it removes.
+                        Item {
+                            id: dismiss
+                            anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
+                            width: 16
+                            height: 16
+                            // armed while the pointer is on the chip or on the
+                            // cross itself, so it does not blink out the moment
+                            // you move onto it
+                            property bool armed: chipMouse.containsMouse || dismissMouse.containsMouse
+                            opacity: armed ? 1 : 0
+                            Behavior on opacity {
+                                NumberAnimation { duration: 130; easing.type: Easing.OutCubic }
+                            }
+
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: 16
+                                height: 16
+                                radius: 8
+                                color: dismissMouse.containsMouse ? Qt.rgba(1, 1, 1, 0.22)
+                                     : dismiss.armed ? Qt.rgba(1, 1, 1, 0.10) : "transparent"
+                                Behavior on color { ColorAnimation { duration: 110 } }
+                            }
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: 7
+                                height: 1
+                                antialiasing: true
+                                rotation: 45
+                                color: dismissMouse.containsMouse ? "white" : Qt.rgba(1, 1, 1, 0.5)
+                                Behavior on color { ColorAnimation { duration: 110 } }
+                            }
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: 7
+                                height: 1
+                                antialiasing: true
+                                rotation: -45
+                                color: dismissMouse.containsMouse ? "white" : Qt.rgba(1, 1, 1, 0.5)
+                                Behavior on color { ColorAnimation { duration: 110 } }
+                            }
+
+                            MouseArea {
+                                id: dismissMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                // disabled while faded out, or it would swallow
+                                // clicks meant for the chip underneath it
+                                enabled: dismiss.armed
+                                preventStealing: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    root.draggingOut = false
+                                    root.removeAt(chip.index)
+                                }
                             }
                         }
                     }

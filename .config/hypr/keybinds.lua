@@ -28,6 +28,9 @@ hl.bind(mainMod .. " + SHIFT + M", hl.dsp.window.move({ workspace = "special:min
 -- Restore: toggle the overlay showing the minimized windows
 hl.bind(mainMod .. " + M", hl.dsp.workspace.toggle_special("minimized"))
 
+-- Spotify side panel: slide the player out of the left edge, Super+M style
+hl.bind(mainMod .. " + Right", hl.dsp.exec_cmd(home .. "/.config/hypr/scripts/spotify-panel.sh"))
+
 hl.bind(mainMod .. " + GRAVE", hl.dsp.exec_cmd("qs ipc call powermenu toggle")) -- Power menu
 
 hl.bind(mainMod .. " + I", hl.dsp.exec_cmd("qs ipc call settings toggle")) -- Settings

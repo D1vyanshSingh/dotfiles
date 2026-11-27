@@ -29,6 +29,21 @@ PanelWindow {
     // windows on the workspace in front of you. HyprlandToplevel on this build
     // exposes workspace (id -98 for the minimized overlay) but no class or
     // hidden properties, so the workspace is the only thing worth asking.
+    //
+    // pinned windows are the exception: hyprland counts them as a window of the
+    // workspace, but they are overlays that float over every workspace by design
+    // (wispr-flow's dictation pill). counting one would hide the dock everywhere
+    // at once, which looks exactly like the dock being broken.
+    function isPinnedOverlay(t) {
+        try {
+            const o = t.lastIpcObject
+            if (o && o.pinned === true) return true
+            const c = String((o && o["class"]) || "").toLowerCase()
+            if (c === "wispr-flow") return true
+        } catch (e) {}
+        return false
+    }
+
     readonly property int windowsHere: {
         const w = Hyprland.focusedWorkspace
         const id = w ? Number(w.id) : NaN
@@ -36,7 +51,7 @@ PanelWindow {
         let n = 0
         for (let i = 0; i < ts.length; i++) {
             const tw = ts[i].workspace
-            if (tw && Number(tw.id) === id) n++
+            if (tw && Number(tw.id) === id && !dock.isPinnedOverlay(ts[i])) n++
         }
         return n
     }

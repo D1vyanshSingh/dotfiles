@@ -8,6 +8,9 @@ ShellRoot {
     PowerMenu {}
     Bar {}
     Shelf {}
+    CalendarApp {}
+    Datesheet {}
+    MusicPanel {}
     DesktopWidgets {}
     Todo {}
     Dock {}

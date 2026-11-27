@@ -60,6 +60,30 @@ Scope {
     property var calCells: []
     property int calRows: 6
     property string monthStr: ""
+    // what the agenda has written down, read straight from its state file: the
+    // tile only needs the days, not the words
+    property var calMarks: []
+
+    // the datesheet, recounted once a day rather than once a second
+    property var examRows: []
+    property var examNext: null
+    property int examDays: -1
+    property string examDayKey: ""
+
+    function pad2(n) { return (n < 10 ? "0" : "") + n }
+
+    function dayHasEvent(day) {
+        if (day < 1) return false
+        var d = new Date()
+        var full = d.getFullYear() + "-" + root.pad2(d.getMonth() + 1) + "-" + root.pad2(day)
+        var md = root.pad2(d.getMonth() + 1) + "-" + root.pad2(day)
+        for (var i = 0; i < root.calMarks.length; i++) {
+            var e = root.calMarks[i]
+            if (!e || typeof e.date !== "string" || e.date.length < 10) continue
+            if (e.bday === true ? e.date.substring(5) === md : e.date === full) return true
+        }
+        return false
+    }
 
     property var player: null
     property string artUrl: ""
@@ -79,6 +103,40 @@ Scope {
         root.clock = Qt.formatTime(d, "HH:mm")
         root.dateStr = Qt.formatDate(d, "ddd, d MMM").toUpperCase()
         root.buildCalendar()
+        root.buildExams()
+    }
+
+    // one row per paper, with the day count against today's local midnight. The
+    // first paper still ahead is the one the hero counts down to.
+    function buildExams() {
+        var now = new Date()
+        var key = now.getFullYear() + "-" + (now.getMonth() + 1) + "-" + now.getDate()
+        if (key === root.examDayKey) return
+        root.examDayKey = key
+
+        var list = ExamDays.exams
+        var rows = []
+        var next = null
+        for (var i = 0; i < list.length; i++) {
+            var e = list[i]
+            var left = ExamDays.daysUntil(e.date)
+            var row = {
+                subject: e.subject,
+                date: ExamDays.shortDate(e.date),
+                dow: ExamDays.dow(e.date),
+                days: left,
+                past: left < 0,
+                next: false
+            }
+            if (next === null && left >= 0) {
+                next = row
+                row.next = true
+            }
+            rows.push(row)
+        }
+        root.examRows = rows
+        root.examNext = next
+        root.examDays = next === null ? -1 : next.days
     }
 
     function buildCalendar() {
@@ -225,6 +283,12 @@ Scope {
         command: ["qs", "ipc", "call", "todo", "toggle"]
     }
 
+    Process {
+        id: openDatesheet
+        running: false
+        command: ["qs", "ipc", "call", "datesheet", "toggle"]
+    }
+
     Timer {
         interval: 1000
         running: !root.userHidden
@@ -282,6 +346,24 @@ Scope {
         function toggle(): void { root.userHidden = !root.userHidden }
         function show(): void { root.userHidden = false }
         function hide(): void { root.userHidden = true }
+    }
+
+    FileView {
+        id: calStore
+        path: Quickshell.env("HOME") + "/.config/quickshell/state/calendar-state.json"
+        printErrors: false
+        watchChanges: true
+        onFileChanged: reload()
+        onLoaded: {
+            try {
+                var data = JSON.parse(text())
+                var arr = Array.isArray(data) ? data : (data.events || [])
+                root.calMarks = Array.isArray(arr) ? arr : []
+            } catch (e) {
+                root.calMarks = []
+            }
+        }
+        onLoadFailed: root.calMarks = []
     }
 
     // ───────────────────────── pieces ─────────────────────────
@@ -664,6 +746,85 @@ Scope {
                         scrimBottom: 0
                     }
                 }
+
+                // ── work harder ──
+                // a mindset poster: the frame cropped square to the face and
+                // the stacks, the line set like it was stamped on
+                Tile {
+                    width: root.leftWidth
+                    height: 168
+
+                    Item {
+                        id: grindPhoto
+                        anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+                        width: 168
+                        clip: true
+                        layer.enabled: true
+                        layer.effect: OpacityMask { maskSource: grindMask }
+
+                        Image {
+                            anchors.fill: parent
+                            source: Qt.resolvedUrl("assets/work-harder.png")
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                        }
+
+                        // the print is dark already; a whisper of extra weight at
+                        // the foot keeps it from floating over the wallpaper
+                        Rectangle {
+                            anchors.fill: parent
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, 0.0) }
+                                GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.30) }
+                            }
+                        }
+
+                        Rectangle {
+                            id: grindMask
+                            width: grindPhoto.width
+                            height: grindPhoto.height
+                            radius: Theme.radiusTile
+                            visible: false
+                            layer.enabled: true
+                        }
+                    }
+
+                    Column {
+                        anchors {
+                            left: grindPhoto.right; leftMargin: 16
+                            right: parent.right; rightMargin: 16
+                            verticalCenter: parent.verticalCenter
+                        }
+                        spacing: 9
+
+                        Text {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            text: "NOBODY CARES"
+                            color: root.inkA(0.88)
+                            font.family: root.mono
+                            font.pixelSize: 15
+                            font.letterSpacing: 6
+                        }
+
+                        Rectangle {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: 26
+                            height: 1
+                            color: root.inkA(0.22)
+                        }
+
+                        Text {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            text: "WORK HARDER"
+                            color: root.inkA(0.62)
+                            font.family: root.mono
+                            font.pixelSize: 10
+                            font.letterSpacing: 4
+                        }
+                    }
+                }
             }
         }
     }
@@ -827,7 +988,28 @@ Scope {
                         width: 234
                         height: 214
                         label: "CALENDAR"
-                        badge: root.monthStr
+                        badge: calHover.hovered ? "OPEN \u203A" : root.monthStr
+
+                        // the tile is a door: its edge brightens under the
+                        // pointer and a click opens the agenda on the month it
+                        // is already showing
+                        HoverHandler { id: calHover }
+
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: Theme.radiusTile
+                            color: "transparent"
+                            border.width: 1
+                            border.color: root.inkA(0.30)
+                            opacity: calHover.hovered ? 1 : 0
+                            Behavior on opacity { NumberAnimation { duration: 140 } }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: Quickshell.execDetached(["qs", "ipc", "call", "agenda", "toggle"])
+                        }
 
                         Column {
                             anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: 18; rightMargin: 18; bottomMargin: 16 }
@@ -880,12 +1062,24 @@ Scope {
 
                                         Text {
                                             anchors.centerIn: parent
+                                            anchors.verticalCenterOffset: -2
                                             visible: modelData.current
                                             text: modelData.day
                                             color: modelData.today ? root.ink : root.inkA(0.62)
                                             font.family: root.mono
                                             font.pixelSize: 9
                                             font.bold: modelData.today
+                                        }
+
+                                        // a day with something on it keeps a
+                                        // dot, so the wall is worth glancing at
+                                        Rectangle {
+                                            visible: modelData.current && root.dayHasEvent(modelData.day)
+                                            anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 1 }
+                                            width: 3
+                                            height: 3
+                                            radius: 1.5
+                                            color: root.inkA(modelData.today ? 0.85 : 0.45)
                                         }
                                     }
                                 }
@@ -908,6 +1102,143 @@ Scope {
                                 value: root.batPct
                                 caption: root.charging ? "CHRG" : "BAT"
                                 reading: root.batPct + "%"
+                            }
+                        }
+                    }
+                }
+
+                // ── datesheet ──
+                // the next paper counted big, then the whole sheet in order.
+                // the tile is a door: a click opens the syllabus behind it.
+                Tile {
+                    width: root.rightWidth
+                    height: 252
+                    label: "DATESHEET"
+                    badge: root.examDays < 0 ? "CLEAR" : (root.examDays === 0 ? "TODAY" : "IN " + root.examDays + "D")
+
+                    HoverHandler { id: dsHover }
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: Theme.radiusTile
+                        color: "transparent"
+                        border.width: 1
+                        border.color: root.inkA(0.30)
+                        opacity: dsHover.hovered ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 140 } }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: openDatesheet.running = true
+                    }
+
+                    Item {
+                        id: examHero
+                        anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 20; rightMargin: 20; topMargin: 38 }
+                        height: 56
+
+                        Text {
+                            id: examNum
+                            anchors { left: parent.left; bottom: parent.bottom; bottomMargin: -8 }
+                            text: root.examDays < 0 ? "\u2014" : root.examDays
+                            color: root.ink
+                            font.family: root.display
+                            font.weight: Font.ExtraLight
+                            font.pixelSize: 52
+                            font.letterSpacing: -3
+                        }
+
+                        Column {
+                            anchors { left: examNum.right; leftMargin: 14; bottom: parent.bottom; bottomMargin: 6 }
+                            spacing: 3
+
+                            Text {
+                                text: "DAYS TO"
+                                color: root.inkA(0.34)
+                                font.family: root.mono
+                                font.pixelSize: 7
+                                font.letterSpacing: 2
+                            }
+
+                            Text {
+                                text: root.examNext ? root.examNext.subject : "NOTHING LEFT"
+                                color: root.inkA(0.92)
+                                font.family: root.mono
+                                font.pixelSize: 14
+                                font.letterSpacing: 4
+                            }
+
+                            Text {
+                                text: root.examNext ? root.examNext.dow + " " + root.examNext.date : ""
+                                color: root.inkA(0.38)
+                                font.family: root.mono
+                                font.pixelSize: 8
+                                font.letterSpacing: 1
+                            }
+                        }
+                    }
+
+                    Column {
+                        anchors { left: parent.left; right: parent.right; top: examHero.bottom; topMargin: 6; leftMargin: 20; rightMargin: 20 }
+                        spacing: 0
+
+                        Repeater {
+                            model: root.examRows
+
+                            Item {
+                                id: examRow
+                                required property var modelData
+                                width: parent.width
+                                height: 27
+
+                                Rectangle {
+                                    anchors { left: parent.left; right: parent.right; top: parent.top }
+                                    height: 1
+                                    color: root.inkA(0.05)
+                                }
+
+                                Rectangle {
+                                    id: examMark
+                                    anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                                    width: 3
+                                    height: 3
+                                    radius: 1.5
+                                    color: examRow.modelData.next ? root.inkA(0.9)
+                                         : root.inkA(examRow.modelData.past ? 0.16 : 0.4)
+                                }
+
+                                Text {
+                                    anchors { left: examMark.right; leftMargin: 12; verticalCenter: parent.verticalCenter }
+                                    text: examRow.modelData.subject
+                                    color: examRow.modelData.past ? root.inkA(0.26)
+                                         : root.inkA(examRow.modelData.next ? 0.95 : 0.68)
+                                    font.family: root.mono
+                                    font.pixelSize: 10
+                                    font.letterSpacing: 2
+                                }
+
+                                Text {
+                                    id: examDaysText
+                                    anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                                    text: examRow.modelData.days < 0 ? "DONE"
+                                         : (examRow.modelData.days === 0 ? "TODAY" : examRow.modelData.days + "D")
+                                    color: examRow.modelData.days === 0 ? root.ink
+                                         : root.inkA(examRow.modelData.past ? 0.18 : 0.42)
+                                    font.family: root.mono
+                                    font.pixelSize: 8
+                                    font.letterSpacing: 1
+                                }
+
+                                Text {
+                                    anchors { right: examDaysText.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+                                    text: examRow.modelData.date
+                                    color: root.inkA(examRow.modelData.past ? 0.16 : 0.3)
+                                    font.family: root.mono
+                                    font.pixelSize: 8
+                                    font.letterSpacing: 1
+                                }
                             }
                         }
                     }
